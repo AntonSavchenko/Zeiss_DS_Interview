@@ -116,7 +116,7 @@ ax.tick_params(axis='x', labelrotation=45)
 
 
     
-![png](ZEISS_DS_Task_files/ZEISS_DS_Task_5_0.png)
+![png](README_files/ZEISS_DS_Task_5_0.png)
     
 
 
@@ -149,7 +149,7 @@ sns.histplot(data=temps, x="temperature", hue="property_name", bins=list(range(1
 
 
     
-![png](ZEISS_DS_Task_files/ZEISS_DS_Task_8_1.png)
+![png](README_files/ZEISS_DS_Task_8_1.png)
     
 
 
@@ -171,7 +171,7 @@ for i,(c,bins) in enumerate(zip(['weekday','month','hour'],[7,12,24])):
 
 
     
-![png](ZEISS_DS_Task_files/ZEISS_DS_Task_9_0.png)
+![png](README_files/ZEISS_DS_Task_9_0.png)
     
 
 
@@ -335,7 +335,7 @@ sns.violinplot(data=temps, x="hour", y="temperature", hue="property_name", split
 
 
     
-![png](ZEISS_DS_Task_files/ZEISS_DS_Task_17_1.png)
+![png](README_files/ZEISS_DS_Task_17_1.png)
     
 
 
@@ -354,7 +354,7 @@ sns.violinplot(data=temps, x="weekday", y="temperature", hue="property_name", sp
 
 
     
-![png](ZEISS_DS_Task_files/ZEISS_DS_Task_18_1.png)
+![png](README_files/ZEISS_DS_Task_18_1.png)
     
 
 
@@ -373,7 +373,7 @@ sns.violinplot(data=temps, x="month", y="temperature", hue="property_name", spli
 
 
     
-![png](ZEISS_DS_Task_files/ZEISS_DS_Task_19_1.png)
+![png](README_files/ZEISS_DS_Task_19_1.png)
     
 
 
