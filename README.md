@@ -110,13 +110,13 @@ for c in temps.columns:
 
 ```python
 # To better visualize the data, let's plot the temperature values over the datetime, separating the cooling and heating temperatures by color
-ax = sns.scatterplot(data=temps, x="datetime", y="temperature",hue="property_name")
+ax = sns.scatterplot(data=temps, x='datetime', y='temperature',hue='property_name', hue_order=['cooling_temperature','heating_temperature'])
 ax.tick_params(axis='x', labelrotation=45)
 ```
 
 
     
-![png](README_files/ZEISS_DS_Task_5_0.png)
+![png](README_files/README_5_0.png)
     
 
 
@@ -137,7 +137,7 @@ ax.tick_params(axis='x', labelrotation=45)
 ```python
 # Looking at the distribution of temperature readings overall, it seems that both cooling and heating temperatures follow a multi-modal distribution
 # The value of 15 degrees is most probably used as some "default" value for the cooling temperature
-sns.histplot(data=temps, x="temperature", hue="property_name", bins=list(range(14,41)), multiple="dodge", shrink=0.9)
+sns.histplot(data=temps, x='temperature', hue='property_name', bins=list(range(14,41)), multiple='dodge', shrink=0.9, hue_order=['cooling_temperature','heating_temperature'])
 ```
 
 
@@ -149,7 +149,7 @@ sns.histplot(data=temps, x="temperature", hue="property_name", bins=list(range(1
 
 
     
-![png](README_files/ZEISS_DS_Task_8_1.png)
+![png](README_files/README_8_1.png)
     
 
 
@@ -166,12 +166,12 @@ fig, axes = plt.subplots(2,2)
 # because some months don't have any data, we need to hard-code the bin counts for the histogram, otherwise we could set
 # bins = temps[c].nunique()
 for i,(c,bins) in enumerate(zip(['weekday','month','hour'],[7,12,24])):
-    sns.histplot(data=temps, x=c, hue="property_name",multiple="stack", bins=bins, ax=axes[i%2,i//2])
+    sns.histplot(data=temps, x=c, hue='property_name',multiple='stack', bins=bins, ax=axes[i%2,i//2], hue_order=['cooling_temperature','heating_temperature'])
 ```
 
 
     
-![png](README_files/ZEISS_DS_Task_9_0.png)
+![png](README_files/README_9_0.png)
     
 
 
@@ -323,7 +323,8 @@ As the next step in investigating the underlying structure we can consider the d
 # A useful tool for visualizations of this kind are "violin plots" that extend the standard candlestick plots with more detailed density representation of data
 
 # First, let us consider the hourly distribution of the temperature readings within the dataset
-sns.violinplot(data=temps, x="hour", y="temperature", hue="property_name", split=True, inner="stick", cut=0, density_norm="count")
+sns.violinplot(data=temps, x='hour', y='temperature', hue='property_name', split=True, inner='stick',
+               cut=0, density_norm='count', hue_order=['cooling_temperature','heating_temperature'])
 ```
 
 
@@ -335,14 +336,15 @@ sns.violinplot(data=temps, x="hour", y="temperature", hue="property_name", split
 
 
     
-![png](README_files/ZEISS_DS_Task_17_1.png)
+![png](README_files/README_17_1.png)
     
 
 
 
 ```python
 # Similarly, we can plot the information depending on the weekday
-sns.violinplot(data=temps, x="weekday", y="temperature", hue="property_name", split=True, gap=.1, inner="box", cut=0, density_norm="count")
+sns.violinplot(data=temps, x='weekday', y='temperature', hue='property_name', split=True, gap=.1, inner='box',
+               cut=0, density_norm='count', hue_order=['cooling_temperature','heating_temperature'])
 ```
 
 
@@ -354,14 +356,15 @@ sns.violinplot(data=temps, x="weekday", y="temperature", hue="property_name", sp
 
 
     
-![png](README_files/ZEISS_DS_Task_18_1.png)
+![png](README_files/README_18_1.png)
     
 
 
 
 ```python
 # Lastly, looking at the monthly data we can evaluate potential relation to the temperature of the environment
-sns.violinplot(data=temps, x="month", y="temperature", hue="property_name", split=True, gap=.1, inner="box", cut=0, density_norm="count")
+sns.violinplot(data=temps, x='month', y='temperature', hue='property_name', split=True, gap=.1, inner='box',
+               cut=0, density_norm='count', hue_order=['cooling_temperature','heating_temperature'])
 ```
 
 
@@ -373,7 +376,7 @@ sns.violinplot(data=temps, x="month", y="temperature", hue="property_name", spli
 
 
     
-![png](README_files/ZEISS_DS_Task_19_1.png)
+![png](README_files/README_19_1.png)
     
 
 
@@ -381,6 +384,107 @@ sns.violinplot(data=temps, x="month", y="temperature", hue="property_name", spli
 - These visualizations confirm previous observations: There is a large discrepancy between the data collected during working hours on workdays, and the data collected outside of these time frames
 - Monthly data mainly shows the difference in the volume of data, but there doesn't seem to be a big yearly trend. The low volume of cooling data for the winter months could be explained by lower environment temperature, yet could also be just correlated with overall reduced volume of measurements
 - The biggest trends can be observed in the hourly data - beyond the separation between working hours and the rest, one can spot different phases appearing throught the workday - the second mode in the heating_temperature only seem present in the morning hours and could be related to some warm-up phases of the underlying process. It could also be the potential "anomaly", that either stems from the overheating in the preceding hours or absence of some sensor readings before the workday start.
+
+# 3. Modeling
+- We have determined that the most consistent patterns arise in the intra-day data, and it would be interesting to see if we could determine even more structure in these data.
+- To me the most interesting aspect would be determining if there is a significant level of correlation between the datapoints that are collected at consecutive time points.
+- If that is not the case, and each datapoint seems independent from the one before and the one after, then the best predictive model would simply approximate the sampled distribution of the point at specific hour of the day.
+- However, if there is a high degree of correlation between the temperature readings, we can generate a predictive model that could either impute missing values throughout the day, or even predict values we would expect in the evening hours from the values we see in the morning hours.
+
+
+```python
+# To make it easier to extract data from each day, we will add more derivative features to the dataframe
+
+temps['time'] = temps['datetime'].dt.time           # datetime portion for time of day
+temps['dayofyear'] = temps['datetime'].dt.dayofyear # Given that the data spans less than a year, extracting ordinal day of the year is enough
+
+# Given that the data is mostly collected on an hourly basis, I would expect to have just one measurement of each type (cooling/heating) at each hour of each day.
+# Ideally I would need to inspect the cases with multiple measurements more closely, but given the time constraints we can simply average those measurements
+temps.groupby(['dayofyear','hour','property_name'])['source_id'].count().value_counts()
+```
+
+
+
+
+    source_id
+    1    876
+    2     50
+    3      5
+    4      1
+    5      1
+    Name: count, dtype: int64
+
+
+
+
+```python
+# As we have stated already, observed behavior varies greatly within working hours and outside of working hours.
+# To make the matter simpler, I would just concentrate on the working hours, and for now on just the heating temperature readings
+
+heating_working_hours = temps.query('weekday<5 and property_name=="heating_temperature"')
+
+# Now let's average "duplicates" that appear more than once within one hour
+heating_working_hours = heating_working_hours.groupby(['dayofyear','hour'])['temperature'].mean().reset_index()
+```
+
+
+```python
+# With that, we can quickly check how the daily trajectories look like
+sns.lineplot(data=heating_working_hours, x='hour', y='temperature',hue='dayofyear')
+```
+
+
+
+
+    <Axes: xlabel='hour', ylabel='temperature'>
+
+
+
+
+    
+![png](README_files/README_24_1.png)
+    
+
+
+### Observation: 
+It appears that there is a very clear pattern:
+- if the heating was on for the night, the heating temperature will be set to ~35 degrees from 7AM
+- if there were no heating measurements before the workday began, then at some point throughout the day the process starts, probably from the room temperature, and brought up to ~35 degrees over the course of ~4 hours
+
+### Possible modeling approach:
+- given that the trajectories seem so straightforward, I don't see the need for complex machinery such as Gaussian Processes
+- we can separate the data into two clusters - the "warmed up" days vs "cold start" days based on the temperature readings at 7am
+- for the "cold start" cluster there might be a simple curve fitting, matching the first heating temperature reading of the day to the follow-up measurements
+- some trajectories show temperatures falling below 32.5 degrees, which could indicate either an end of the batch cycle or possible faults (could be external termination of the process)
+
+
+```python
+# To quickly select the "cold start" curves, we can simply select the dayofyear values for which heating temperature was below 30 degrees:
+cold_start_days = temps.query('property_name=="heating_temperature" and temperature<30')['dayofyear'].unique()
+
+# Now we only select those days and heating_temperature measurements, and then create a new column indicating the time passed since the first measurement of the day
+cold_start_df = temps[(temps['dayofyear'].isin(cold_start_days)) & (temps['property_name']=='heating_temperature')].copy()
+cold_start_df['time_from_start'] = cold_start_df['datetime'].sub(cold_start_df.groupby(['dayofyear'])['datetime'].transform('first'))
+```
+
+
+```python
+# Even though this is still incorrect, it should give us a much clearer picture of the underlying data
+sns.lineplot(data=cold_start_df, x='time_from_start', y='temperature',hue='dayofyear')
+```
+
+
+
+
+    <Axes: xlabel='time_from_start', ylabel='temperature'>
+
+
+
+
+    
+![png](README_files/README_27_1.png)
+    
+
 
 
 ```python
