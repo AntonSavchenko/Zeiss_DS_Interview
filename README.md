@@ -7,6 +7,7 @@
 # jupyter lab v. 4.1.5
 # pandas      v. 2.2.1
 # numpy       v. 1.26.4
+# scipy       v. 1.12.0
 # matplotlib  v. 3.8.2
 # seaborn     v. 0.13.2
 
@@ -36,19 +37,6 @@ temps.head(3)
 
 
 <div>
-<style scoped>
-    .dataframe tbody tr th:only-of-type {
-        vertical-align: middle;
-    }
-
-    .dataframe tbody tr th {
-        vertical-align: top;
-    }
-
-    .dataframe thead th {
-        text-align: right;
-    }
-</style>
 <table border="1" class="dataframe">
   <thead>
     <tr style="text-align: right;">
@@ -203,19 +191,6 @@ temps2.groupby(['count','property_name'])[['source_id']].count()
 
 
 <div>
-<style scoped>
-    .dataframe tbody tr th:only-of-type {
-        vertical-align: middle;
-    }
-
-    .dataframe tbody tr th {
-        vertical-align: top;
-    }
-
-    .dataframe thead th {
-        text-align: right;
-    }
-</style>
 <table border="1" class="dataframe">
   <thead>
     <tr style="text-align: right;">
@@ -419,7 +394,7 @@ temps.groupby(['dayofyear','hour','property_name'])['source_id'].count().value_c
 
 ```python
 # As we have stated already, observed behavior varies greatly within working hours and outside of working hours.
-# To make the matter simpler, I would just concentrate on the working hours, and for now on just the heating temperature readings
+# Let's see if we can determine the cause of this discrepancy by plotting the daily trajectories
 
 heating_working_hours = temps.query('weekday<5 and property_name=="heating_temperature"')
 
@@ -469,7 +444,7 @@ cold_start_df['time_from_start'] = cold_start_df['datetime'].sub(cold_start_df.g
 
 
 ```python
-# Even though this is still incorrect, it should give us a much clearer picture of the underlying data
+# Now we have the daily curves that start from the point of the first measurement - it is still not ideal, since the starting temperature values are different
 sns.lineplot(data=cold_start_df, x='time_from_start', y='temperature',hue='dayofyear')
 ```
 
@@ -486,7 +461,106 @@ sns.lineplot(data=cold_start_df, x='time_from_start', y='temperature',hue='dayof
     
 
 
+### Curve fitting
+These curves have a recognizable shape - it looks like a proportional gain feedback. Let us assume that the heating temperature is used for a controlled warming of the underlying process from whichever initial state to the target temperature. And it is done in the way, that the rate of change of the temperature at any time point should be proportional to the discrepancy between the current measurement and the target measurement, i.e.
+
+$\dot{x}(t) = p\cdot (target - x(t))$
+
+If we transform the temperature measurements to the error coordinates $e(t) = target - x(t)$, then the solution of this ODE is an exponential decay function of the form
+
+$e(t) = a \cdot \exp(-b\cdot t)$
+
+For $a$ and $b$ being positive constants.
+
+Let us find a quick way of determining these parameters and check if it would fit the observed data.
+
 
 ```python
+# First, let us select the trajectoried that we will use for curve fitting - I would propose taking those that start from a very low heating_temperature measurement:
+selected_days = temps.query('property_name=="heating_temperature" and temperature<22.7')['dayofyear'].unique()
 
+# we can now extract these days' data, converting the timedelta variables to seconds
+fit_data = cold_start_df[cold_start_df['dayofyear'].isin(selected_days)][['time_from_start','temperature','dayofyear']]
+fit_data['time_from_start'] = fit_data['time_from_start'].dt.total_seconds()
+
+# one of the trajectories seems slightly off, which might indicate an outlier
+sns.lineplot(data=fit_data, x='time_from_start', y='temperature',hue='dayofyear')
+
+# Let's for now remove that day's trajectory to improve the fit
+fit_data = fit_data[fit_data['dayofyear']!=191]
 ```
+
+
+    
+![png](README_files/README_29_0.png)
+    
+
+
+
+```python
+# Next step is to estimate the value for the target temperature. We can, of course, just pick a value based on the visual inspection of the data,
+# but we could also derive it from the dataset.
+
+# Let's assume that the target temperature is a median of maximal temperature readings achieved by each day's trajectory
+target = cold_start_df.groupby(['dayofyear'])['temperature'].max().median()
+print(f'Target temperature is estimated as {target:0.2f} degrees.')
+```
+
+    Target temperature is estimated as 34.50 degrees.
+    
+
+
+```python
+# Now we can utilize the curve_fit tool from scipy library
+from scipy.optimize import curve_fit
+
+(a,b),_ = curve_fit(lambda t,a,b: a*np.exp(-b*t),  fit_data['time_from_start'],target - fit_data['temperature'], p0 = (12,0.0001))
+
+print(f'Fit exponential curve has the form: e(t) = {a:0.2f}*exp(-{b:0.5f}*t)')
+```
+
+    Fit exponential curve has the form: e(t) = 12.15*exp(-0.00018*t)
+    
+
+
+```python
+# As the last step we can go back to all the data selected in "cold_start_days" and see if they fit the model.
+# Since each trajectory's initial temperature reading is different, we would assume that it starts along the fitted trajectory, and see if it deviates later on.
+# To calculate the starting point we can invert the fitted function as follows:
+# target - heating_temperature[init] = a*exp(-b*t[init])    ===>    t[init] = - log((target - heating_temperature[init])/a)/b
+
+def get_init_offset(temp,target=target, a=a,b=b):
+    return -np.log((target - temp)/a)/b
+
+cold_start_df['fit_time'] = cold_start_df['time_from_start'].dt.total_seconds() + cold_start_df.groupby(['dayofyear'])['temperature'].transform('first').apply(get_init_offset)
+```
+
+
+```python
+# Now each day's trajectory is placed on the fitted line and we can check if they stay relatively close to it during the course of the day
+sns.lineplot(data=cold_start_df, x='fit_time', y='temperature',hue='dayofyear',palette=sns.color_palette("light:b", as_cmap=True))
+
+# Let's add the actual fitted model on top as a comparison
+xmodel = np.linspace(-100,52000,1000)
+ymodel = target - a*np.exp(-b*xmodel)
+plt.plot(xmodel,ymodel,color='#ff7f0e',lw=4,ls='--')
+```
+
+
+
+
+    [<matplotlib.lines.Line2D at 0x12be3847fd0>]
+
+
+
+
+    
+![png](README_files/README_33_1.png)
+    
+
+
+### Final observations:
+- The daily trajectories seem to closely follow the fitted curve in general
+- Whether the increasing variance on the tail end of the trajectories is an indication of inaccurate model fit or physical effects of the underlying process is still unclear
+- We haven't yet checked if there is a relation between these values and the cooling_temperatures, which could also explain the variance
+
