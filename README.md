@@ -3,16 +3,21 @@
 
 ```python
 # Python environment:
-# python      v. 3.10.10
-# jupyter lab v. 4.1.5
-# pandas      v. 2.2.1
-# numpy       v. 1.26.4
-# scipy       v. 1.12.0
-# matplotlib  v. 3.8.2
-# seaborn     v. 0.13.2
+# python         v. 3.10.10
+# jupyter lab    v. 4.1.5
+# pandas         v. 2.2.1
+# numpy          v. 1.26.4
+# scipy          v. 1.12.0
+# scikit-learn   v. 1.4.1
+# matplotlib     v. 3.8.2
+# seaborn        v. 0.13.2
 
 import pandas as pd
 import numpy as np
+
+# tools for modeling and verification (see section 3)
+from scipy.optimize import curve_fit
+from sklearn.metrics import r2_score
 
 # visualization tools
 import matplotlib.pyplot as plt
@@ -115,9 +120,9 @@ ax.tick_params(axis='x', labelrotation=45)
 - It is not yet clear if this is an indication of an error or some limitation of the data collection
 
 ### Next steps:
-- Collect more information about clustering of cooling_temperature data
+- Collect more information about distributions of temperature data
 - Investigate possible temporal dependencies in the data
-- Look for ways to detect abnormal behavior in the data
+- Design a model that aims to predict the temperature data based on the observations
 
 # 1. Closer data inspection
 
@@ -356,7 +361,7 @@ sns.violinplot(data=temps, x='month', y='temperature', hue='property_name', spli
 
 
 ### Observations:
-- These visualizations confirm previous observations: There is a large discrepancy between the data collected during working hours on workdays, and the data collected outside of these time frames
+- These visualizations confirm previous observations: there is a large discrepancy between the data collected during working hours on workdays, and the data collected outside of these time frames
 - Monthly data mainly shows the difference in the volume of data, but there doesn't seem to be a big yearly trend. The low volume of cooling data for the winter months could be explained by lower environment temperature, yet could also be just correlated with overall reduced volume of measurements
 - The biggest trends can be observed in the hourly data - beyond the separation between working hours and the rest, one can spot different phases appearing throught the workday - the second mode in the heating_temperature only seem present in the morning hours and could be related to some warm-up phases of the underlying process. It could also be the potential "anomaly", that either stems from the overheating in the preceding hours or absence of some sensor readings before the workday start.
 
@@ -370,54 +375,27 @@ sns.violinplot(data=temps, x='month', y='temperature', hue='property_name', spli
 ```python
 # To make it easier to extract data from each day, we will add more derivative features to the dataframe
 
-temps['time'] = temps['datetime'].dt.time           # datetime portion for time of day
-temps['dayofyear'] = temps['datetime'].dt.dayofyear # Given that the data spans less than a year, extracting ordinal day of the year is enough
+temps['dayofyear'] = temps['datetime'].dt.dayofyear                          # Given that the data spans less than a year, extracting ordinal day of the year is enough
+temps['timeofday'] = temps['datetime'].sub(temps['datetime'].dt.floor('D'))  # We can operate with the time within a day as a timedelta type by substracting the beginning of the day's timestamp
 
-# Given that the data is mostly collected on an hourly basis, I would expect to have just one measurement of each type (cooling/heating) at each hour of each day.
-# Ideally I would need to inspect the cases with multiple measurements more closely, but given the time constraints we can simply average those measurements
-temps.groupby(['dayofyear','hour','property_name'])['source_id'].count().value_counts()
-```
-
-
-
-
-    source_id
-    1    876
-    2     50
-    3      5
-    4      1
-    5      1
-    Name: count, dtype: int64
-
-
-
-
-```python
 # As we have stated already, observed behavior varies greatly within working hours and outside of working hours.
 # Let's see if we can determine the cause of this discrepancy by plotting the daily trajectories
-
 heating_working_hours = temps.query('weekday<5 and property_name=="heating_temperature"')
 
-# Now let's average "duplicates" that appear more than once within one hour
-heating_working_hours = heating_working_hours.groupby(['dayofyear','hour'])['temperature'].mean().reset_index()
-```
-
-
-```python
 # With that, we can quickly check how the daily trajectories look like
-sns.lineplot(data=heating_working_hours, x='hour', y='temperature',hue='dayofyear')
+sns.lineplot(data=heating_working_hours, x='timeofday', y='temperature',hue='dayofyear')
 ```
 
 
 
 
-    <Axes: xlabel='hour', ylabel='temperature'>
+    <Axes: xlabel='timeofday', ylabel='temperature'>
 
 
 
 
     
-![png](README_files/README_24_1.png)
+![png](README_files/README_22_1.png)
     
 
 
@@ -428,7 +406,7 @@ It appears that there is a very clear pattern:
 
 ### Possible modeling approach:
 - given that the trajectories seem so straightforward, I don't see the need for complex machinery such as Gaussian Processes
-- we can separate the data into two clusters - the "warmed up" days vs "cold start" days based on the temperature readings at 7am
+- we can separate the data into two clusters - the "warmed up" days vs "cold start" days based on their lowest temperature readings throughout the day
 - for the "cold start" cluster there might be a simple curve fitting, matching the first heating temperature reading of the day to the follow-up measurements
 - some trajectories show temperatures falling below 32.5 degrees, which could indicate either an end of the batch cycle or possible faults (could be external termination of the process)
 
@@ -457,12 +435,12 @@ sns.lineplot(data=cold_start_df, x='time_from_start', y='temperature',hue='dayof
 
 
     
-![png](README_files/README_27_1.png)
+![png](README_files/README_25_1.png)
     
 
 
 ### Curve fitting
-These curves have a recognizable shape - it looks like a proportional gain feedback. Let us assume that the heating temperature is used for a controlled warming of the underlying process from whichever initial state to the target temperature. And it is done in the way, that the rate of change of the temperature at any time point should be proportional to the discrepancy between the current measurement and the target measurement, i.e.
+These curves have a recognizable shape - it looks like a proportional gain feedback. Let us assume that the heating temperature is an indication of a controlled warming of the underlying process from whichever initial state to the target temperature. And it is done in the way, that the rate of change of the temperature at any time point should be proportional to the discrepancy between the current measurement and the target measurement, i.e.
 
 $\dot{x}(t) = p\cdot (target - x(t))$
 
@@ -492,7 +470,7 @@ fit_data = fit_data[fit_data['dayofyear']!=191]
 
 
     
-![png](README_files/README_29_0.png)
+![png](README_files/README_27_0.png)
     
 
 
@@ -512,8 +490,6 @@ print(f'Target temperature is estimated as {target:0.2f} degrees.')
 
 ```python
 # Now we can utilize the curve_fit tool from scipy library
-from scipy.optimize import curve_fit
-
 (a,b),_ = curve_fit(lambda t,a,b: a*np.exp(-b*t),  fit_data['time_from_start'],target - fit_data['temperature'], p0 = (12,0.0001))
 
 print(f'Fit exponential curve has the form: e(t) = {a:0.2f}*exp(-{b:0.5f}*t)')
@@ -532,7 +508,7 @@ print(f'Fit exponential curve has the form: e(t) = {a:0.2f}*exp(-{b:0.5f}*t)')
 def get_init_offset(temp,target=target, a=a,b=b):
     return -np.log((target - temp)/a)/b
 
-cold_start_df['fit_time'] = cold_start_df['time_from_start'].dt.total_seconds() + cold_start_df.groupby(['dayofyear'])['temperature'].transform('first').apply(get_init_offset)
+cold_start_df['fit_time'] = cold_start_df['time_from_start'].dt.total_seconds().add(cold_start_df.groupby(['dayofyear'])['temperature'].transform('first').apply(get_init_offset))
 ```
 
 
@@ -541,7 +517,7 @@ cold_start_df['fit_time'] = cold_start_df['time_from_start'].dt.total_seconds() 
 sns.lineplot(data=cold_start_df, x='fit_time', y='temperature',hue='dayofyear',palette=sns.color_palette("light:b", as_cmap=True))
 
 # Let's add the actual fitted model on top as a comparison
-xmodel = np.linspace(-100,52000,1000)
+xmodel = np.linspace(-100,51000,1000)
 ymodel = target - a*np.exp(-b*xmodel)
 plt.plot(xmodel,ymodel,color='#ff7f0e',lw=4,ls='--')
 ```
@@ -549,7 +525,49 @@ plt.plot(xmodel,ymodel,color='#ff7f0e',lw=4,ls='--')
 
 
 
-    [<matplotlib.lines.Line2D at 0x12be3847fd0>]
+    [<matplotlib.lines.Line2D at 0x244981eb640>]
+
+
+
+
+    
+![png](README_files/README_31_1.png)
+    
+
+
+### Model Evaluation
+Now that the model is designed and fitted, the obvious question to ask is "is it any good?"
+That question is not very easy to answer in general, since models are designed to be used in certain conditions, and thus the same model could be good or bad depending on the task it's used for.
+
+But a general approach to evaluating model quality could be described as "how much better can this model explain/predict the data compared to using a (much) simpler model?"
+I have already mentioned a possible modeling approach that averages all measurement readings for specific hour of the day and uses those as predicitons, but a more standard approach is to use a measure called the $R^2$-score.
+
+This score shows the "coefficient of determination", indicating how well the variance in the datapoints explained by the model. The formula for the $R^2$-score looks as follows:
+
+$R^2(y,\hat{y}) = 1 - \frac{\displaystyle\sum_{i=i}^n(y_i-\hat{y}_i)^2}{\displaystyle\sum_{i=i}^n(y_i-\overline{y})^2},$
+
+where $y_i$ are the actual measurements, $\hat{y}_i$ are our model predictions for these measurements, and $\overline{y} = \textbf{mean}(y_i)$ is the average across the considered dataset.
+
+In practical terms, if the model predicts every single data point exactly, the $R^2$-score will be equal to $1$, and if the sum of all errors vs. the model is as large as the sum of all errors vs. the mean $\overline{y}$, then the $R^2$-score will be equal to $0$. Technically the $R^2$-score can go down to $-\infty$, but values below zero indicate that your model is so bad that just predicting the mean of your data is better on average.
+
+*Remark*: Alternatively, if another model exist, one can compare their ability to represent the data directly. Measures like $\quad RMSE(y,\hat{y}) = \sqrt{\sum_{i=1}^n(y_i-\hat{y}_i)^2/n}\quad$ can be calculated in the same manner and the model with lower value would normally be considered better.
+
+
+```python
+# We will calculate the R^2-score for the datapoints that we selected from the "cold_start_days"
+
+# To do that, for each datapoint we need to know both it's real measurement and its prediction from our model. Since we have already fitted the time offset,
+# all we need to do is evaluate the model on the fit_time value for each point:
+cold_start_df['temp_predictions'] = cold_start_df['fit_time'].apply(lambda t: target - a*np.exp(-b*t))
+
+# As a small sanity check we can plot the temperature against our predictions - if the predictions are good, they should exhibit a high degree of correlation
+sns.pairplot(data=cold_start_df[['temperature','temp_predictions']],kind='kde',corner=True)
+```
+
+
+
+
+    <seaborn.axisgrid.PairGrid at 0x24496dc5a50>
 
 
 
@@ -559,8 +577,17 @@ plt.plot(xmodel,ymodel,color='#ff7f0e',lw=4,ls='--')
     
 
 
+
+```python
+# Finally, we simply feed the columns of temperatures and our predictions to the r2_score function from scikit-learn:
+r2s = r2_score(cold_start_df['temperature'],cold_start_df['temp_predictions'])
+print(f'The R^2-score of the developed model is {r2s:0.3f}')
+```
+
+    The R^2-score of the developed model is 0.963
+    
+
 ### Final observations:
 - The daily trajectories seem to closely follow the fitted curve in general
 - Whether the increasing variance on the tail end of the trajectories is an indication of inaccurate model fit or physical effects of the underlying process is still unclear
-- We haven't yet checked if there is a relation between these values and the cooling_temperatures, which could also explain the variance
-
+- We haven't yet checked if there is a relation between these values and the cooling_temperatures, which could also explain some of the variance
